@@ -13,7 +13,8 @@ import {
   Download,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { memo, useEffect, useState } from 'react';
+import { Suspense, memo, useCallback, useEffect, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { CopyButton } from '@/components/CopyButton';
 import { FormField } from '@/components/FormField';
@@ -199,7 +200,25 @@ const PaymentMobileCard = memo(function PaymentMobileCard({
   );
 });
 
-export default function PaymentsPage() {
+const DEFAULT_STATUS_FILTER = 'pending_confirmed';
+const STATUS_FILTER_OPTIONS = [
+  { value: 'pending_confirmed', label: 'Pending + Confirmed' },
+  { value: 'all', label: 'All payments' },
+] as const;
+
+function statusFilterToApiValue(filter: string): string | undefined {
+  if (filter === 'all') return undefined;
+  if (filter === 'pending_confirmed') return 'pending,confirmed';
+  return undefined;
+}
+
+function PaymentsPageContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const urlStatusFilter =
+    searchParams.get('status') === 'all' ? 'all' : DEFAULT_STATUS_FILTER;
+
   const [payments, setPayments] = useState<Payment[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -217,13 +236,22 @@ export default function PaymentsPage() {
   const [copied, setCopied] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(urlStatusFilter);
 
-  const load = async (p = 1) => {
+  useEffect(() => {
+    setStatusFilter(urlStatusFilter);
+  }, [urlStatusFilter]);
+
+  const load = useCallback(async (p = 1, filter = statusFilter) => {
     setLoading(true);
     setError('');
     try {
-      setError('');
-      const { data } = await paymentsApi.list(p, 20);
+      const { data } = await paymentsApi.list(
+        p,
+        20,
+        undefined,
+        statusFilterToApiValue(filter)
+      );
       setPayments(data.payments);
       setTotal(data.total);
     } catch (err) {
@@ -231,11 +259,26 @@ export default function PaymentsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter]);
 
   useEffect(() => {
-    load(page);
-  }, [page]);
+    load(page, statusFilter);
+  }, [page, statusFilter, load]);
+
+  const handleStatusFilterChange = (next: string) => {
+    setStatusFilter(next);
+    setPage(1);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === DEFAULT_STATUS_FILTER) {
+      params.delete('status');
+    } else {
+      params.set('status', next);
+    }
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, {
+      scroll: false,
+    });
+  };
   // Client-side search filter — matches reference (case-insensitive) or
   // amountUsd. The API paginates server-side, so this filters within the
   // current page's results. This lets merchants quickly locate a specific
@@ -404,8 +447,8 @@ export default function PaymentsPage() {
       </div>
 
       {/* Search bar — lets merchants find a specific payment by reference or amount */}
-      <div className="mb-4">
-        <div className="relative max-w-sm">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-sm w-full">
           <Search
             className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
             aria-hidden="true"
@@ -429,6 +472,27 @@ export default function PaymentsPage() {
               <X className="w-4 h-4" aria-hidden="true" />
             </button>
           )}
+        </div>
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="payments-status-filter"
+            className="text-sm text-gray-600 whitespace-nowrap"
+          >
+            Status
+          </label>
+          <select
+            id="payments-status-filter"
+            data-testid="payments-status-filter"
+            value={statusFilter}
+            onChange={(e) => handleStatusFilterChange(e.target.value)}
+            className="py-2 px-3 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-white"
+          >
+            {STATUS_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -630,7 +694,9 @@ export default function PaymentsPage() {
             <div className="px-6 py-8 text-center text-gray-400 text-sm">
               {searchQuery
                 ? 'No payments match your search'
-                : 'No payments yet'}
+                : statusFilter === 'pending_confirmed'
+                  ? 'No pending or confirmed payments'
+                  : 'No payments yet'}
             </div>
           ) : (
             filteredPayments.map((p) => (
@@ -701,7 +767,9 @@ export default function PaymentsPage() {
                   >
                     {searchQuery
                       ? 'No payments match your search'
-                      : 'No payments yet'}
+                      : statusFilter === 'pending_confirmed'
+                        ? 'No pending or confirmed payments'
+                        : 'No payments yet'}
                   </td>
                 </tr>
               ) : (
@@ -788,5 +856,13 @@ export default function PaymentsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function PaymentsPage() {
+  return (
+    <Suspense fallback={<div className="p-4 md:p-8">Loading payments…</div>}>
+      <PaymentsPageContent />
+    </Suspense>
   );
 }
