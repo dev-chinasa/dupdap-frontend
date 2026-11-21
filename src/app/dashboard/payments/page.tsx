@@ -237,10 +237,25 @@ function PaymentsPageContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [exporting, setExporting] = useState(false);
   const [statusFilter, setStatusFilter] = useState(urlStatusFilter);
+  const [isMobileCreateFlow, setIsMobileCreateFlow] = useState(false);
+  const [createStep, setCreateStep] = useState(1);
 
   useEffect(() => {
     setStatusFilter(urlStatusFilter);
   }, [urlStatusFilter]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mql = window.matchMedia('(max-width: 767px)');
+    const onChange = () => setIsMobileCreateFlow(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!showCreate) setCreateStep(1);
+  }, [showCreate]);
 
   const load = useCallback(async (p = 1, filter = statusFilter) => {
     setLoading(true);
@@ -503,7 +518,13 @@ function PaymentsPageContent() {
         testId="create-payment-modal"
       >
         <form
-          onSubmit={createPayment}
+          onSubmit={(e) => {
+            if (isMobileCreateFlow && createStep < 4) {
+              e.preventDefault();
+              return;
+            }
+            return createPayment(e);
+          }}
           className="space-y-4"
           aria-busy={creating}
         >
@@ -512,64 +533,227 @@ function PaymentsPageContent() {
             {creating ? 'Creating payment, please wait…' : ''}
           </p>
           <fieldset disabled={creating} className="space-y-4">
-            <FormField
-              label="Amount (USD)"
-              name="amountUsd"
-              type="number"
-              step="0.01"
-              min="0.01"
-              required
-              value={form.amountUsd}
-              onChange={(e) => setForm({ ...form, amountUsd: e.target.value })}
-            />
-            <FormField
-              label="Description (optional)"
-              name="description"
-              type="text"
-              required={false}
-              maxLength={MAX_DESCRIPTION_LENGTH}
-              hint={
-                <span data-testid="description-char-counter">
-                  {form.description.length}/{MAX_DESCRIPTION_LENGTH}
-                </span>
-              }
-              value={form.description}
-              onChange={(e) =>
-                setForm({ ...form, description: e.target.value })
-              }
-            />
-            <FormField
-              label="Customer Email (optional)"
-              name="customerEmail"
-              type="email"
-              required={false}
-              value={form.customerEmail}
-              onChange={(e) =>
-                setForm({ ...form, customerEmail: e.target.value })
-              }
-            />
-            <FormField
-              label="Expires in (minutes)"
-              name="expiryMinutes"
-              type="number"
-              aria-describedby="expiry-minutes-hint"
-              value={form.expiryMinutes}
-              onChange={(e) =>
-                setForm({ ...form, expiryMinutes: e.target.value })
-              }
-            />
-            <p id="expiry-minutes-hint" className="text-xs text-gray-500">
-              Must be a whole number between {EXPIRY_MIN_MINUTES} and{' '}
-              {EXPIRY_MAX_MINUTES} minutes.
-            </p>
-            <button
-              data-testid="create-payment-submit"
-              type="submit"
-              disabled={creating}
-              className="btn-primary w-full"
-            >
-              {creating ? 'Creating...' : 'Create Payment'}
-            </button>
+            {isMobileCreateFlow ? (
+              <>
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span data-testid="create-payment-step">
+                    Step {createStep} of 4
+                  </span>
+                  <span>
+                    {['Amount', 'Description', 'Customer email', 'Review'][createStep - 1]}
+                  </span>
+                </div>
+
+                {createStep === 1 && (
+                  <>
+                    <FormField
+                      label="Amount (USD)"
+                      name="amountUsd"
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={form.amountUsd}
+                      onChange={(e) =>
+                        setForm({ ...form, amountUsd: e.target.value })
+                      }
+                    />
+                    <FormField
+                      label="Expires in (minutes)"
+                      name="expiryMinutes"
+                      type="number"
+                      aria-describedby="expiry-minutes-hint"
+                      value={form.expiryMinutes}
+                      onChange={(e) =>
+                        setForm({ ...form, expiryMinutes: e.target.value })
+                      }
+                    />
+                    <p id="expiry-minutes-hint" className="text-xs text-gray-500">
+                      Must be a whole number between {EXPIRY_MIN_MINUTES} and{' '}
+                      {EXPIRY_MAX_MINUTES} minutes.
+                    </p>
+                  </>
+                )}
+
+                {createStep === 2 && (
+                  <FormField
+                    label="Description (optional)"
+                    name="description"
+                    type="text"
+                    required={false}
+                    maxLength={MAX_DESCRIPTION_LENGTH}
+                    hint={
+                      <span data-testid="description-char-counter">
+                        {form.description.length}/{MAX_DESCRIPTION_LENGTH}
+                      </span>
+                    }
+                    value={form.description}
+                    onChange={(e) =>
+                      setForm({ ...form, description: e.target.value })
+                    }
+                  />
+                )}
+
+                {createStep === 3 && (
+                  <FormField
+                    label="Customer Email (optional)"
+                    name="customerEmail"
+                    type="email"
+                    required={false}
+                    value={form.customerEmail}
+                    onChange={(e) =>
+                      setForm({ ...form, customerEmail: e.target.value })
+                    }
+                  />
+                )}
+
+                {createStep === 4 && (
+                  <div
+                    data-testid="create-payment-review"
+                    className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2 text-sm"
+                  >
+                    <div className="flex justify-between gap-4">
+                      <span className="text-gray-500">Amount</span>
+                      <span className="font-medium">
+                        {form.amountUsd ? `$${Number(form.amountUsd).toFixed(2)}` : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-gray-500">Description</span>
+                      <span className="font-medium text-right break-words">
+                        {form.description || '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-gray-500">Customer email</span>
+                      <span className="font-medium text-right break-words">
+                        {form.customerEmail || '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-gray-500">Expires in</span>
+                      <span className="font-medium">
+                        {form.expiryMinutes || '—'} minutes
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  {createStep > 1 && (
+                    <button
+                      type="button"
+                      data-testid="create-payment-back"
+                      onClick={() => setCreateStep((s) => Math.max(1, s - 1))}
+                      className="btn-secondary flex-1"
+                    >
+                      Back
+                    </button>
+                  )}
+                  {createStep < 4 ? (
+                    <button
+                      type="button"
+                      data-testid="create-payment-next"
+                      onClick={() => {
+                        if (createStep === 1) {
+                          const amountUsd = parseFloat(form.amountUsd);
+                          if (Number.isNaN(amountUsd) || amountUsd <= 0) {
+                            toast.error('Enter a valid amount');
+                            return;
+                          }
+                          const expiryMinutes = parseInt(form.expiryMinutes, 10);
+                          if (
+                            !Number.isFinite(expiryMinutes) ||
+                            !Number.isInteger(expiryMinutes) ||
+                            expiryMinutes < EXPIRY_MIN_MINUTES ||
+                            expiryMinutes > EXPIRY_MAX_MINUTES
+                          ) {
+                            toast.error(
+                              `Expiry must be a whole number between ${EXPIRY_MIN_MINUTES} and ${EXPIRY_MAX_MINUTES} minutes`
+                            );
+                            return;
+                          }
+                        }
+                        setCreateStep((s) => Math.min(4, s + 1));
+                      }}
+                      className="btn-primary flex-1"
+                    >
+                      Next
+                    </button>
+                  ) : (
+                    <button
+                      data-testid="create-payment-submit"
+                      type="submit"
+                      disabled={creating}
+                      className="btn-primary flex-1"
+                    >
+                      {creating ? 'Creating...' : 'Create Payment'}
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <FormField
+                  label="Amount (USD)"
+                  name="amountUsd"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  value={form.amountUsd}
+                  onChange={(e) => setForm({ ...form, amountUsd: e.target.value })}
+                />
+                <FormField
+                  label="Description (optional)"
+                  name="description"
+                  type="text"
+                  required={false}
+                  maxLength={MAX_DESCRIPTION_LENGTH}
+                  hint={
+                    <span data-testid="description-char-counter">
+                      {form.description.length}/{MAX_DESCRIPTION_LENGTH}
+                    </span>
+                  }
+                  value={form.description}
+                  onChange={(e) =>
+                    setForm({ ...form, description: e.target.value })
+                  }
+                />
+                <FormField
+                  label="Customer Email (optional)"
+                  name="customerEmail"
+                  type="email"
+                  required={false}
+                  value={form.customerEmail}
+                  onChange={(e) =>
+                    setForm({ ...form, customerEmail: e.target.value })
+                  }
+                />
+                <FormField
+                  label="Expires in (minutes)"
+                  name="expiryMinutes"
+                  type="number"
+                  aria-describedby="expiry-minutes-hint"
+                  value={form.expiryMinutes}
+                  onChange={(e) =>
+                    setForm({ ...form, expiryMinutes: e.target.value })
+                  }
+                />
+                <p id="expiry-minutes-hint" className="text-xs text-gray-500">
+                  Must be a whole number between {EXPIRY_MIN_MINUTES} and{' '}
+                  {EXPIRY_MAX_MINUTES} minutes.
+                </p>
+                <button
+                  data-testid="create-payment-submit"
+                  type="submit"
+                  disabled={creating}
+                  className="btn-primary w-full"
+                >
+                  {creating ? 'Creating...' : 'Create Payment'}
+                </button>
+              </>
+            )}
           </fieldset>
         </form>
       </Modal>
